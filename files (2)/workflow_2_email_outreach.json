@@ -1,0 +1,369 @@
+{
+  "name": "📧 Workflow 2 — AI Email Outreach Campaign",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "aa000001-0000-0000-0000-000000000001",
+      "name": "Schedule Trigger (10AM Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "operation": "readAllRows",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "options": {}
+      },
+      "id": "aa000002-0000-0000-0000-000000000002",
+      "name": "Google Sheets — Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gsheets-creds",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-pending",
+              "leftValue": "={{$json['Status']}}",
+              "rightValue": "Pending",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-email-present",
+              "leftValue": "={{$json['Email']}}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "aa000003-0000-0000-0000-000000000003",
+      "name": "Filter — Pending Leads Only",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "aa000004-0000-0000-0000-000000000004",
+      "name": "Split Into Batches of 10",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "amount": 45,
+        "unit": "seconds"
+      },
+      "id": "aa000005-0000-0000-0000-000000000005",
+      "name": "Wait 45s Between Batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1120, 220],
+      "webhookId": "wait-webhook-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY_HERE"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "claude-sonnet-4-20250514",
+          "max_tokens": 600,
+          "system": "You are an expert cold email copywriter. You write short, conversational, highly personalized cold emails. Your emails are never spammy. They feel like one human reaching out to another. You always return ONLY a JSON object with two keys: 'subject' and 'body'. No markdown, no explanation, just raw JSON.",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Write a personalized cold email for the following prospect:\n\nName: {{$json['First Name']}}\nTitle: {{$json['Title']}}\nCompany: {{$json['Company']}}\nIndustry: {{$json['Industry']}}\nWebsite: {{$json['Website']}}\n\nContext about us:\nWe build AI-powered digital assistants for business websites. Our products include:\n- AI Sales Bot: Automates their sales process and handles visitor inquiries\n- Website Explainer: Helps visitors navigate and find what they need\n- Product Explainer: Explains products clearly to convert more visitors\n- AI Manager: General AI admin assistant for their business operations\n\nOur goal: Find out if they'd be willing to pay for any of these solutions.\n\nEmail requirements:\n- Subject line: catchy, personalized, NOT clickbait (mention their company or industry)\n- Body: Under 120 words\n- Tone: friendly, direct, conversational. No corporate fluff.\n- Do NOT list all 4 products. Pick the 1 most relevant for their industry and lead with that.\n- End with a soft CTA: ask if this is something they'd consider paying for, or if they'd like to see a quick demo.\n- Sign off as: The AI Solutions Team\n\nReturn ONLY this JSON (no backticks, no markdown):\n{\"subject\": \"...\", \"body\": \"...\"}"
+            }
+          ]
+        }
+      },
+      "id": "aa000006-0000-0000-0000-000000000006",
+      "name": "Claude AI — Personalize Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1340, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the email subject and body from Claude's response\nconst responseData = $input.first().json;\n\n// Get the text content from Claude's response\nconst contentBlocks = responseData.content || [];\nconst textBlock = contentBlocks.find(b => b.type === 'text');\nconst rawText = textBlock ? textBlock.text : '{}';\n\nlet subject = 'Quick question about your business';\nlet body = 'Hi there, I wanted to reach out about our AI solutions.';\n\ntry {\n  // Strip any accidental markdown fences\n  const cleaned = rawText.replace(/```json|```/g, '').trim();\n  const parsed = JSON.parse(cleaned);\n  subject = parsed.subject || subject;\n  body    = parsed.body    || body;\n} catch (e) {\n  // Fallback: use raw text as body if JSON parse fails\n  body = rawText.substring(0, 500);\n}\n\n// Merge with existing lead data from the previous step\n// The lead data is 2 items back in the chain — we pass it forward via the Set node\nconst item = $input.first();\n\nreturn [{\n  json: {\n    ...item.json,\n    generatedSubject: subject,\n    generatedBody:    body\n  }\n}];"
+      },
+      "id": "aa000007-0000-0000-0000-000000000007",
+      "name": "Extract Subject & Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge Claude output with original lead data\n// This node receives two inputs:\n//   input[0] = Claude's parsed email (subject + body)\n//   input[1] = original lead row from Google Sheets\n\n// Since n8n processes in sequence, both pieces of data\n// should be merged in the Extract node. This node is a\n// safety net to ensure all fields are present.\n\nconst item = $input.first().json;\n\nreturn [{\n  json: {\n    email:            item['Email']            || item.email,\n    firstName:        item['First Name']        || item.firstName,\n    lastName:         item['Last Name']         || item.lastName,\n    fullName:         item['Full Name']         || item.fullName,\n    company:          item['Company']           || item.company,\n    title:            item['Title']             || item.title,\n    industry:         item['Industry']          || item.industry,\n    website:          item['Website']           || item.website,\n    rowNumber:        item.row_number           || '',\n    generatedSubject: item.generatedSubject     || 'Quick question for you',\n    generatedBody:    item.generatedBody        || 'Hi, I wanted to reach out.'\n  }\n}];"
+      },
+      "id": "aa000008-0000-0000-0000-000000000008",
+      "name": "Merge Lead + Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 220]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$json.email}}",
+        "subject": "={{$json.generatedSubject}}",
+        "emailType": "text",
+        "message": "={{$json.generatedBody}}",
+        "options": {
+          "replyTo": "YOUR_REPLY_TO_EMAIL@yourdomain.com",
+          "appendAttribution": false
+        }
+      },
+      "id": "aa000009-0000-0000-0000-000000000009",
+      "name": "Gmail — Send Outreach Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2000, 220],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-creds",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status":        "Sent",
+            "Email Sent At": "={{new Date().toISOString()}}",
+            "Email Subject": "={{$json.generatedSubject}}"
+          }
+        },
+        "where": {
+          "values": [
+            {
+              "lookupColumn": "Email",
+              "lookupValue": "={{$json.email}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aa000010-0000-0000-0000-000000000010",
+      "name": "Google Sheets — Mark as Sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2220, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gsheets-creds",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "aa000011-0000-0000-0000-000000000011",
+      "name": "Skip — Already Contacted",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 420]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (10AM Mon-Fri)": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets — Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets — Read All Leads": {
+      "main": [
+        [
+          {
+            "node": "Filter — Pending Leads Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — Pending Leads Only": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches of 10",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip — Already Contacted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Batches of 10": {
+      "main": [
+        [
+          {
+            "node": "Wait 45s Between Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 45s Between Batches": {
+      "main": [
+        [
+          {
+            "node": "Claude AI — Personalize Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude AI — Personalize Email": {
+      "main": [
+        [
+          {
+            "node": "Extract Subject & Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Subject & Body": {
+      "main": [
+        [
+          {
+            "node": "Merge Lead + Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Lead + Email Data": {
+      "main": [
+        [
+          {
+            "node": "Gmail — Send Outreach Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail — Send Outreach Email": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets — Mark as Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "wf2-version-001",
+  "id": "workflow-email-outreach-002",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "replace-with-your-n8n-instance-id"
+  },
+  "tags": [
+    { "id": "tag-outreach", "name": "AI Outreach" },
+    { "id": "tag-email", "name": "Email Campaign" }
+  ]
+}

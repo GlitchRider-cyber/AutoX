@@ -1,0 +1,254 @@
+{
+  "name": "🔍 Workflow 1 — Lead Scraper (Apollo → Google Sheets)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Schedule Trigger (9AM Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/v1/mixed_people/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Cache-Control",
+              "value": "no-cache"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{$credentials.apolloApiKey}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "person_titles": ["founder", "co-founder", "CEO", "owner", "director", "managing director", "president"],
+          "contact_email_status": ["verified", "guessed"],
+          "prospected_by_current_team": ["no"],
+          "person_not_in_workspace_contacts": true,
+          "q_organization_num_employees_ranges": ["1,20", "21,50", "51,200"],
+          "page": "={{$runIndex + 1}}",
+          "per_page": 100
+        }
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Apollo.io — Search People",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "apollo-creds",
+          "name": "Apollo API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten Apollo's response into clean lead objects\nconst people = $input.first().json.people || [];\n\nconst leads = [];\n\nfor (const person of people) {\n  // Only include people with an email\n  if (!person.email) continue;\n\n  // Only include people at orgs with a website\n  const website = person.organization?.website_url || '';\n  if (!website) continue;\n\n  // Build clean lead record\n  const lead = {\n    firstName:    person.first_name || '',\n    lastName:     person.last_name  || '',\n    fullName:     `${person.first_name || ''} ${person.last_name || ''}`.trim(),\n    email:        person.email,\n    title:        person.title || '',\n    companyName:  person.organization?.name || '',\n    industry:     person.organization?.industry || '',\n    website:      website,\n    linkedinUrl:  person.linkedin_url || '',\n    city:         person.city || '',\n    country:      person.country || '',\n    employees:    person.organization?.estimated_num_employees || '',\n    apolloId:     person.id || '',\n    scrapedAt:    new Date().toISOString(),\n    status:       'Pending',\n    emailSentAt:  '',\n    replied:      'No',\n    notes:        ''\n  };\n\n  leads.push({ json: lead });\n}\n\nreturn leads;"
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Process & Flatten Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-email",
+              "leftValue": "={{$json.email}}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "cond-website",
+              "leftValue": "={{$json.website}}",
+              "rightValue": "http",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "cond-name",
+              "leftValue": "={{$json.firstName}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "d4e5f6a7-b8c9-0123-def0-234567890123",
+      "name": "Filter — Valid Leads Only",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID_HERE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "First Name":    "={{$json.firstName}}",
+            "Last Name":     "={{$json.lastName}}",
+            "Full Name":     "={{$json.fullName}}",
+            "Email":         "={{$json.email}}",
+            "Title":         "={{$json.title}}",
+            "Company":       "={{$json.companyName}}",
+            "Industry":      "={{$json.industry}}",
+            "Website":       "={{$json.website}}",
+            "LinkedIn":      "={{$json.linkedinUrl}}",
+            "City":          "={{$json.city}}",
+            "Country":       "={{$json.country}}",
+            "Employees":     "={{$json.employees}}",
+            "Apollo ID":     "={{$json.apolloId}}",
+            "Scraped At":    "={{$json.scrapedAt}}",
+            "Status":        "={{$json.status}}",
+            "Email Sent At": "={{$json.emailSentAt}}",
+            "Replied":       "={{$json.replied}}",
+            "Notes":         "={{$json.notes}}"
+          }
+        },
+        "matchingColumns": ["Email"],
+        "options": {}
+      },
+      "id": "e5f6a7b8-c9d0-1234-ef01-345678901234",
+      "name": "Google Sheets — Append Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1120, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gsheets-creds",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "f6a7b8c9-d0e1-2345-f012-456789012345",
+      "name": "Discard — No Email or Website",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1120, 420]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (9AM Mon-Fri)": {
+      "main": [
+        [
+          {
+            "node": "Apollo.io — Search People",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo.io — Search People": {
+      "main": [
+        [
+          {
+            "node": "Process & Flatten Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process & Flatten Leads": {
+      "main": [
+        [
+          {
+            "node": "Filter — Valid Leads Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — Valid Leads Only": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets — Append Lead",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discard — No Email or Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "wf1-version-001",
+  "id": "workflow-lead-scraper-001",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "replace-with-your-n8n-instance-id"
+  },
+  "tags": [
+    { "id": "tag-outreach", "name": "AI Outreach" },
+    { "id": "tag-leads", "name": "Lead Gen" }
+  ]
+}
